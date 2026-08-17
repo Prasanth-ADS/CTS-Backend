@@ -3,6 +3,7 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.inference.ensemble import predict_ensemble
+from app.llm.symptom_extraction import extract_observations
 from app.reasoning.fusion import fuse_predictions
 from app.schemas.diagnosis import (
     AnswerRequest,
@@ -58,7 +59,6 @@ async def start_diagnosis(
         "metadata": metadata.model_dump(),
         "per_model_topk": per_model_topk,
         "initial_distribution": initial_distribution,
-        "initial_distribution": _MOCK_INITIAL_DISTRIBUTION,
         "answers": [],
     }
     return StartResponse(
@@ -74,7 +74,7 @@ async def describe_symptoms(session_id: str, request: DescribeRequest) -> Descri
     if session["status"] != "awaiting_description":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Description is not expected now")
 
-    observations = {"brown_patches": True, "wet_lesions": True, "yellow_halo": None}
+    observations = extract_observations(request.description)
     session.update(
         {
             "status": "awaiting_answer",
