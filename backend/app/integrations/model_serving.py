@@ -1,11 +1,4 @@
-from typing import Protocol
-
-import httpx
-
-
-class ModelServingClient(Protocol):
-    async def predict(self, image_bytes: bytes) -> dict[str, list[tuple[str, float]]]: ...
-    async def get_model_registry(self) -> dict: ...
+from backend.app.integrations.protocols import ModelServingClient
 
 
 class ModelServingError(RuntimeError):
@@ -31,6 +24,8 @@ class MockModelServingClient(ModelServingClient):
 
 class HTTPModelServingClient(ModelServingClient):
     def __init__(self, base_url: str, timeout_seconds: float = 5.0):
+        import httpx
+
         self.client = httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds)
 
     async def predict(self, image_bytes: bytes) -> dict[str, list[tuple[str, float]]]:

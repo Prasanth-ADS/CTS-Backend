@@ -1,12 +1,4 @@
-from typing import Protocol
-
-import httpx
-
-
-class LLMAdapter(Protocol):
-    async def extract_observations(self, description: str) -> dict[str, bool | None]: ...
-    async def generate_explanation(self, diagnosis: dict, recommendations: dict | None) -> str: ...
-    async def answer_followup(self, session_context: dict, question: str) -> str: ...
+from backend.app.integrations.protocols import LLMAdapter
 
 
 class MockLLMAdapter(LLMAdapter):
@@ -29,6 +21,8 @@ class MockLLMAdapter(LLMAdapter):
 
 class SLMAdapter(LLMAdapter):
     def __init__(self, base_url: str, model_name: str):
+        import httpx
+
         self.client = httpx.AsyncClient(base_url=base_url)
         self.model_name = model_name
 

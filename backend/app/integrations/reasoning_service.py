@@ -1,13 +1,4 @@
-from typing import Protocol
-
-import httpx
-
-
-class ReasoningServiceClient(Protocol):
-    async def symptom_match(self, observations: dict) -> list[str]: ...
-    async def qa_knowledge(self, diseases: list[str]) -> dict: ...
-    async def fuse(self, ensemble_belief: dict, symptom_evidence: dict, qa_evidence: list[dict]) -> dict: ...
-    async def get_remedies(self, disease: str) -> dict: ...
+from backend.app.integrations.protocols import ReasoningServiceClient
 
 
 class ReasoningServiceError(RuntimeError):
@@ -64,6 +55,8 @@ class MockReasoningServiceClient(ReasoningServiceClient):
 
 class HTTPReasoningServiceClient(ReasoningServiceClient):
     def __init__(self, base_url: str, timeout_seconds: float = 3.0):
+        import httpx
+
         self.client = httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds)
 
     async def symptom_match(self, observations: dict) -> list[str]:
