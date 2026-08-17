@@ -2,11 +2,9 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
-from app.inference.ensemble import predict_ensemble
-from app.integrations.team2_kb import match_symptoms
+from app.integrations.model_serving import get_model_serving_client
+from app.integrations.reasoning_service import get_reasoning_service_client
 from app.llm.symptom_extraction import extract_observations
-from app.reasoning.candidates import expand_candidate_distribution
-from app.reasoning.fusion import fuse_predictions
 from app.schemas.diagnosis import (
     AnswerRequest,
     AnswerResponse,
@@ -16,7 +14,6 @@ from app.schemas.diagnosis import (
     DiagnosisResult,
     FollowupRequest,
     FollowupResponse,
-    Question,
     StartResponse,
     StatusResponse,
 )
@@ -24,10 +21,6 @@ from app.schemas.diagnosis import (
 router = APIRouter(prefix="/api/v1/diagnosis", tags=["diagnosis"])
 
 _SESSIONS: dict[str, dict] = {}
-_MOCK_QUESTIONS = [
-    Question(question_id="q_water_soaked", text="Do you see water-soaked patches?"),
-    Question(question_id="q_yellow_halo", text="Do the spots have a yellow halo?"),
-]
 
 
 def _get_session(session_id: str) -> dict:
@@ -45,8 +38,7 @@ async def start_diagnosis(
     growth_stage: str | None = Form(default=None),
 ) -> StartResponse:
     image_bytes = await image.read()
-    per_model_topk = await predict_ensemble(image_bytes)
-    initial_distribution = fuse_predictions(per_model_topk)
+    image_distribution = await get_model_serving_client().predict(image_bytes)
 
     session_id = str(uuid4())
     metadata = DiagnosisMetadata(location=location, crop=crop, growth_stage=growth_stage)
@@ -54,14 +46,13 @@ async def start_diagnosis(
         "status": "awaiting_description",
         "image_filename": image.filename,
         "metadata": metadata.model_dump(),
-        "per_model_topk": per_model_topk,
-        "initial_distribution": initial_distribution,
+        "image_distribution": image_distribution,
         "answers": [],
     }
     return StartResponse(
         session_id=session_id,
         status="awaiting_description",
-        initial_distribution=initial_distribution,
+        initial_distribution=image_distribution,
     )
 
 
@@ -72,24 +63,32 @@ async def describe_symptoms(session_id: str, request: DescribeRequest) -> Descri
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Description is not expected now")
 
     observations = extract_observations(request.description)
-    matched_diseases = await match_symptoms(observations)
-    candidate_distribution = expand_candidate_distribution(session["initial_distribution"], matched_diseases)
+    metadata = DiagnosisMetadata(**session["metadata"])
+    reasoning_client = get_reasoning_service_client()
+    candidate_distribution = await reasoning_client.expand_candidates(
+        session["image_distribution"],
+        observations,
+        metadata,
+    )
+    question = await reasoning_client.next_question(candidate_distribution, [])
     session.update(
         {
-            "status": "awaiting_answer",
+            "status": "awaiting_answer" if question else "complete",
             "description": request.description,
             "observations": observations,
-            "matched_diseases": matched_diseases,
             "candidate_distribution": candidate_distribution,
-            "current_question_index": 0,
         }
     )
+    if question is None:
+        result = await reasoning_client.finalize(candidate_distribution, [])
+        session.update({"result": result.model_dump()})
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="No follow-up question is available")
     return DescribeResponse(
         session_id=session_id,
         status="awaiting_answer",
         observations=observations,
         candidate_distribution=candidate_distribution,
-        question=_MOCK_QUESTIONS[0],
+        question=question,
     )
 
 
@@ -99,22 +98,16 @@ async def answer_question(session_id: str, request: AnswerRequest) -> AnswerResp
     if session["status"] != "awaiting_answer":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Answer is not expected now")
 
-    session["answers"].append(request.model_dump())
-    next_index = session.get("current_question_index", 0) + 1
-    if next_index < len(_MOCK_QUESTIONS):
-        session["current_question_index"] = next_index
-        return AnswerResponse(session_id=session_id, status="awaiting_answer", question=_MOCK_QUESTIONS[next_index])
+    answer = request.model_dump()
+    session["answers"].append(answer)
+    answers = [AnswerRequest(**item) for item in session["answers"]]
+    reasoning_client = get_reasoning_service_client()
+    candidate_distribution = session["candidate_distribution"]
+    next_question = await reasoning_client.next_question(candidate_distribution, answers)
+    if next_question is not None:
+        return AnswerResponse(session_id=session_id, status="awaiting_answer", question=next_question)
 
-    result = DiagnosisResult(
-        diagnosed_disease="Potato___Late_blight",
-        confidence_score=0.82,
-        confidence_note="mock_weighted_average_dst_conflict_adjusted",
-        management=["Remove heavily infected leaves", "Avoid overhead irrigation"],
-        prevention=["Use certified disease-free seed", "Improve field air circulation"],
-        precautions=["Confirm with an agricultural specialist before chemical treatment"],
-        references=["https://example.org/team-2-kb/potato-late-blight"],
-        explanation="Mock result: ensemble prediction plus farmer evidence currently points to Potato late blight.",
-    )
+    result = await reasoning_client.finalize(candidate_distribution, answers)
     session.update({"status": "complete", "result": result.model_dump()})
     return AnswerResponse(session_id=session_id, status="complete", result=result)
 
@@ -139,4 +132,5 @@ async def ask_followup(session_id: str, request: FollowupRequest) -> FollowupRes
     if session["status"] != "complete":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Follow-up is available after diagnosis completion")
     disease = session["result"]["diagnosed_disease"]
-    return FollowupResponse(answer=f"Mock SLM answer for {disease}: this should be verified against Team 2 KB guidance.")
+    answer = await get_reasoning_service_client().answer_followup(disease, request.question)
+    return FollowupResponse(answer=answer)

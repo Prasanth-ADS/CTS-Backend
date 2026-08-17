@@ -1,14 +1,12 @@
 from fastapi import FastAPI
 
 from app.api.v1.diagnosis import router as diagnosis_router
-from app.api.v1.models import router as models_router
 from app.core.config import get_settings
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
 
 app.include_router(diagnosis_router)
-app.include_router(models_router)
 
 
 @app.get("/status")
