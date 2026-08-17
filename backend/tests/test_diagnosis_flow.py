@@ -1,62 +1,74 @@
-from fastapi.testclient import TestClient
+import asyncio
+from io import BytesIO
+from types import SimpleNamespace
+
+from fastapi import UploadFile
 
 from backend.app.config import Settings
 from backend.app.main import create_app
+from backend.app.routes.diagnosis import answer_question, ask_followup, describe_symptoms, get_result, start_diagnosis
+from backend.app.schemas.diagnosis import AnswerRequest, DescribeRequest, FollowupRequest
 from backend.app.session import InMemorySessionStore
 
 
+def _request(app):
+    return SimpleNamespace(app=app)
+
+
 def test_full_mocked_diagnosis_flow_start_describe_answer_result():
-    app = create_app(
-        Settings(redis_url="redis://unused", max_turns=3),
-        session_store=InMemorySessionStore(),
-    )
-    client = TestClient(app)
-
-    start = client.post(
-        "/api/v1/diagnosis/start",
-        files={"image": ("leaf.jpg", b"fake-image", "image/jpeg")},
-        data={"crop": "potato"},
-    )
-    assert start.status_code == 200
-    start_payload = start.json()
-    assert start_payload["status"] == "awaiting_description"
-    assert start_payload["session_id"]
-    assert start_payload["initial_distribution"]
-
-    session_id = start_payload["session_id"]
-    describe = client.post(
-        f"/api/v1/diagnosis/{session_id}/describe",
-        json={"description": "Leaves have brown spots and water-soaked patches."},
-    )
-    assert describe.status_code == 200
-    describe_payload = describe.json()
-    assert describe_payload["status"] == "awaiting_answer"
-    assert describe_payload["observations"]
-    assert describe_payload["candidate_distribution"]
-    assert describe_payload["question"]["question_id"]
-
-    current = describe_payload
-    for _ in range(3):
-        answer = client.post(
-            f"/api/v1/diagnosis/{session_id}/answer",
-            json={"question_id": current["question"]["question_id"], "answer": "yes"},
+    async def run_flow():
+        app = create_app(
+            Settings(redis_url="redis://unused", max_turns=3),
+            session_store=InMemorySessionStore(),
         )
-        assert answer.status_code == 200
-        current = answer.json()
-        if current["status"] == "complete":
-            break
+        request = _request(app)
 
-    assert current["status"] == "complete"
-    assert current["result"]["diagnosed_disease"] == "Potato___Late_blight"
-    assert current["result"]["recommendations"]["management"][0]["title"] == "Remove infected leaves"
+        start = await start_diagnosis(
+            request,
+            image=UploadFile(filename="leaf.jpg", file=BytesIO(b"fake-image")),
+            crop="potato",
+        )
+        assert start.status == "awaiting_description"
+        assert start.session_id
+        assert start.initial_distribution
 
-    result = client.get(f"/api/v1/diagnosis/{session_id}/result")
-    assert result.status_code == 200
-    assert result.json() == current["result"]
+        describe = await describe_symptoms(
+            start.session_id,
+            DescribeRequest(description="Leaves have brown spots and water-soaked patches."),
+            request,
+        )
+        assert describe.status == "awaiting_answer"
+        assert describe.observations
+        assert describe.candidate_distribution
+        assert describe.question.question_id
 
-    followup = client.post(
-        f"/api/v1/diagnosis/{session_id}/followup",
-        json={"question": "Can this spread?"},
-    )
-    assert followup.status_code == 200
-    assert followup.json()["answer"]
+        current_question = describe.question
+        answer = None
+        for _ in range(3):
+            answer = await answer_question(
+                start.session_id,
+                AnswerRequest(question_id=current_question.question_id, answer="yes"),
+                request,
+            )
+            if answer.status == "complete":
+                break
+            current_question = answer.question
+
+        assert answer is not None
+        assert answer.status == "complete"
+        assert answer.result is not None
+        assert answer.result.diagnosed_disease == "Potato___Late_blight"
+        assert answer.result.recommendations is not None
+        assert answer.result.recommendations.management[0].title == "Remove infected leaves"
+
+        result = await get_result(start.session_id, request)
+        assert result == answer.result
+
+        followup = await ask_followup(
+            start.session_id,
+            FollowupRequest(question="Can this spread?"),
+            request,
+        )
+        assert followup.answer
+
+    asyncio.run(run_flow())

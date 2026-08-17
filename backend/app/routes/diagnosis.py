@@ -1,3 +1,4 @@
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
@@ -22,6 +23,7 @@ from backend.app.schemas.diagnosis import (
 )
 
 router = APIRouter(prefix="/api/v1/diagnosis", tags=["diagnosis"])
+logger = logging.getLogger(__name__)
 
 
 async def _load_session(request: Request, session_id: str) -> dict:
@@ -72,13 +74,14 @@ async def describe_symptoms(session_id: str, payload: DescribeRequest, request: 
     observations = await request.app.state.llm_adapter.extract_observations(payload.description)
     try:
         matched_diseases = await request.app.state.reasoning_service.symptom_match(observations)
-    except (ReasoningServiceError, NotImplementedError):
+    except (ReasoningServiceError, NotImplementedError) as exc:
+        logger.warning("Reasoning symptom_match failed; proceeding with image ensemble candidates", exc_info=True)
         matched_diseases = []
 
     candidate_distribution = expand_candidates(session["candidate_distribution"], matched_diseases)
     qa_knowledge = await request.app.state.reasoning_service.qa_knowledge(list(candidate_distribution))
     questions = qa_knowledge.get("questions", [])
-    next_question = select_next_question(questions, candidate_distribution, set())
+    next_question = questions[0] if questions else None
     if next_question is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="qa_knowledge_unavailable")
 
@@ -148,7 +151,11 @@ async def answer_question(session_id: str, payload: AnswerRequest, request: Requ
 async def get_result(session_id: str, request: Request) -> DiagnosisResult:
     session = await _load_session(request, session_id)
     if session["status"] != "complete":
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="result_not_ready")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="result_not_ready")
+    if "result" not in session and "last_fusion" in session:
+        result = await _complete_result(request, session["last_fusion"])
+        session["result"] = result.model_dump()
+        await _save_session(request, session_id, session)
     return DiagnosisResult(**session["result"])
 
 

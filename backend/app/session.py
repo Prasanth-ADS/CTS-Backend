@@ -1,7 +1,6 @@
 import json
 from typing import Any, Protocol
 
-from redis.asyncio import Redis
 
 SessionData = dict[str, Any]
 
@@ -13,16 +12,24 @@ class SessionStore(Protocol):
 
 class RedisSessionStore(SessionStore):
     def __init__(self, redis_url: str):
-        self.redis = Redis.from_url(redis_url, decode_responses=True)
+        self.redis_url = redis_url
+        self.redis = None
+
+    def _client(self):
+        if self.redis is None:
+            from redis.asyncio import Redis
+
+            self.redis = Redis.from_url(self.redis_url, decode_responses=True)
+        return self.redis
 
     async def get(self, session_id: str) -> SessionData | None:
-        raw = await self.redis.get(_key(session_id))
+        raw = await self._client().get(_key(session_id))
         if raw is None:
             return None
         return json.loads(raw)
 
     async def set(self, session_id: str, data: SessionData) -> None:
-        await self.redis.set(_key(session_id), json.dumps(data))
+        await self._client().set(_key(session_id), json.dumps(data))
 
 
 class InMemorySessionStore(SessionStore):
