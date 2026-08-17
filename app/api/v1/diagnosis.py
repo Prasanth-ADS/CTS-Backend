@@ -2,6 +2,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
+from app.inference.ensemble import predict_ensemble
+from app.reasoning.fusion import fuse_predictions
 from app.schemas.diagnosis import (
     AnswerRequest,
     AnswerResponse,
@@ -19,11 +21,6 @@ from app.schemas.diagnosis import (
 router = APIRouter(prefix="/api/v1/diagnosis", tags=["diagnosis"])
 
 _SESSIONS: dict[str, dict] = {}
-_MOCK_INITIAL_DISTRIBUTION = {
-    "Potato___Late_blight": 0.46,
-    "Tomato___Late_blight": 0.31,
-    "Alternaria_Solani": 0.23,
-}
 _MOCK_CANDIDATE_DISTRIBUTION = {
     "Potato___Late_blight": 0.51,
     "Tomato___Late_blight": 0.29,
@@ -49,19 +46,25 @@ async def start_diagnosis(
     crop: str | None = Form(default=None),
     growth_stage: str | None = Form(default=None),
 ) -> StartResponse:
+    image_bytes = await image.read()
+    per_model_topk = await predict_ensemble(image_bytes)
+    initial_distribution = fuse_predictions(per_model_topk)
+
     session_id = str(uuid4())
     metadata = DiagnosisMetadata(location=location, crop=crop, growth_stage=growth_stage)
     _SESSIONS[session_id] = {
         "status": "awaiting_description",
         "image_filename": image.filename,
         "metadata": metadata.model_dump(),
+        "per_model_topk": per_model_topk,
+        "initial_distribution": initial_distribution,
         "initial_distribution": _MOCK_INITIAL_DISTRIBUTION,
         "answers": [],
     }
     return StartResponse(
         session_id=session_id,
         status="awaiting_description",
-        initial_distribution=_MOCK_INITIAL_DISTRIBUTION,
+        initial_distribution=initial_distribution,
     )
 
 

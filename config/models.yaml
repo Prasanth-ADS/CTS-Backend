@@ -9,13 +9,25 @@ candidates:
     arch: alexnet
     eval_accuracy: 0.91
     fusion_weight: 0.30
+    mock_top_k:
+      - [Potato___Late_blight, 0.42]
+      - [Tomato___Late_blight, 0.33]
+      - [Alternaria_Solani, 0.25]
   - id: vgg16_v3
     path: s3://bucket/models/vgg16_v3.pth
     arch: vgg16
     eval_accuracy: 0.94
     fusion_weight: 0.40
+    mock_top_k:
+      - [Potato___Late_blight, 0.50]
+      - [Tomato___Late_blight, 0.30]
+      - [Alternaria_Solani, 0.20]
   - id: resnet_v2
     path: s3://bucket/models/resnet_v2.pth
     arch: resnet
     eval_accuracy: 0.92
     fusion_weight: 0.30
+    mock_top_k:
+      - [Potato___Late_blight, 0.45]
+      - [Tomato___Late_blight, 0.31]
+      - [Alternaria_Solani, 0.24]

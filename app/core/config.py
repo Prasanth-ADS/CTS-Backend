@@ -1,13 +1,12 @@
+from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path
 import os
+from pathlib import Path
 from typing import Any
 
-import yaml
-from pydantic import BaseModel
 
-
-class Settings(BaseModel):
+@dataclass(frozen=True)
+class Settings:
     app_name: str = os.getenv("APP_NAME", "Adaptive AI Disease Diagnosis API")
     models_config_path: Path = Path(os.getenv("MODELS_CONFIG_PATH", "config/models.yaml"))
 
@@ -18,6 +17,8 @@ def get_settings() -> Settings:
 
 
 def load_model_registry() -> dict[str, Any]:
+    import yaml
+
     settings = get_settings()
     with settings.models_config_path.open("r", encoding="utf-8") as file:
         return yaml.safe_load(file)
