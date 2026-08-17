@@ -4,7 +4,13 @@ services:
     ports:
       - "8000:8000"
     environment:
-      APP_NAME: Adaptive AI Disease Diagnosis API
-      MODELS_CONFIG_PATH: config/models.yaml
-      TEAM2_KB_URL: ""
-      TEAM2_KB_TIMEOUT_SECONDS: "5"
+      REDIS_URL: redis://redis:6379
+      USE_MOCK_MODEL_SERVING: "true"
+      USE_MOCK_REASONING_SERVICE: "true"
+      USE_MOCK_LLM: "true"
+    depends_on:
+      - redis
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
