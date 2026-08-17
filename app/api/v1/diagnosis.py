@@ -58,6 +58,7 @@ async def start_diagnosis(
         "metadata": metadata.model_dump(),
         "per_model_topk": per_model_topk,
         "initial_distribution": initial_distribution,
+        "initial_distribution": _MOCK_INITIAL_DISTRIBUTION,
         "answers": [],
     }
     return StartResponse(
