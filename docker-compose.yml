@@ -6,3 +6,5 @@ services:
     environment:
       APP_NAME: Adaptive AI Disease Diagnosis API
       MODELS_CONFIG_PATH: config/models.yaml
+      TEAM2_KB_URL: ""
+      TEAM2_KB_TIMEOUT_SECONDS: "5"

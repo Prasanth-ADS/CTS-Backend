@@ -9,6 +9,8 @@ from typing import Any
 class Settings:
     app_name: str = os.getenv("APP_NAME", "Adaptive AI Disease Diagnosis API")
     models_config_path: Path = Path(os.getenv("MODELS_CONFIG_PATH", "config/models.yaml"))
+    team2_kb_url: str | None = os.getenv("TEAM2_KB_URL")
+    team2_kb_timeout_seconds: float = float(os.getenv("TEAM2_KB_TIMEOUT_SECONDS", "5"))
 
 
 @lru_cache

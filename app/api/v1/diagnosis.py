@@ -3,7 +3,9 @@ from uuid import uuid4
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.inference.ensemble import predict_ensemble
+from app.integrations.team2_kb import match_symptoms
 from app.llm.symptom_extraction import extract_observations
+from app.reasoning.candidates import expand_candidate_distribution
 from app.reasoning.fusion import fuse_predictions
 from app.schemas.diagnosis import (
     AnswerRequest,
@@ -22,11 +24,6 @@ from app.schemas.diagnosis import (
 router = APIRouter(prefix="/api/v1/diagnosis", tags=["diagnosis"])
 
 _SESSIONS: dict[str, dict] = {}
-_MOCK_CANDIDATE_DISTRIBUTION = {
-    "Potato___Late_blight": 0.51,
-    "Tomato___Late_blight": 0.29,
-    "Alternaria_Solani": 0.20,
-}
 _MOCK_QUESTIONS = [
     Question(question_id="q_water_soaked", text="Do you see water-soaked patches?"),
     Question(question_id="q_yellow_halo", text="Do the spots have a yellow halo?"),
@@ -75,12 +72,15 @@ async def describe_symptoms(session_id: str, request: DescribeRequest) -> Descri
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Description is not expected now")
 
     observations = extract_observations(request.description)
+    matched_diseases = await match_symptoms(observations)
+    candidate_distribution = expand_candidate_distribution(session["initial_distribution"], matched_diseases)
     session.update(
         {
             "status": "awaiting_answer",
             "description": request.description,
             "observations": observations,
-            "candidate_distribution": _MOCK_CANDIDATE_DISTRIBUTION,
+            "matched_diseases": matched_diseases,
+            "candidate_distribution": candidate_distribution,
             "current_question_index": 0,
         }
     )
@@ -88,7 +88,7 @@ async def describe_symptoms(session_id: str, request: DescribeRequest) -> Descri
         session_id=session_id,
         status="awaiting_answer",
         observations=observations,
-        candidate_distribution=_MOCK_CANDIDATE_DISTRIBUTION,
+        candidate_distribution=candidate_distribution,
         question=_MOCK_QUESTIONS[0],
     )
 
