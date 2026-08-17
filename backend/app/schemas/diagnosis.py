@@ -2,32 +2,24 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 DiagnosisStatus = Literal["awaiting_description", "awaiting_answer", "complete"]
 AnswerValue = Literal["yes", "no", "not_sure"]
-
-
-class DiagnosisMetadata(BaseModel):
-    location: str | None = None
-    crop: str | None = None
-    growth_stage: str | None = None
-
-
-class StartResponse(BaseModel):
-    session_id: str
-    status: Literal["awaiting_description"]
-    initial_distribution: dict[str, float]
-    next_step: str = "describe"
-
-
-class DescribeRequest(BaseModel):
-    description: str = Field(..., min_length=1)
 
 
 class Question(BaseModel):
     question_id: str
     text: str
     options: list[AnswerValue] = ["yes", "no", "not_sure"]
+
+
+class StartResponse(BaseModel):
+    session_id: str
+    status: Literal["awaiting_description"]
+    initial_distribution: dict[str, float]
+
+
+class DescribeRequest(BaseModel):
+    description: str = Field(..., min_length=1)
 
 
 class DescribeResponse(BaseModel):
@@ -43,14 +35,24 @@ class AnswerRequest(BaseModel):
     answer: AnswerValue
 
 
+class RecommendationItem(BaseModel):
+    title: str
+    priority: int
+
+
+class Recommendations(BaseModel):
+    management: list[RecommendationItem]
+    prevention: list[RecommendationItem]
+    precautions: list[RecommendationItem]
+    references: list[str]
+
+
 class DiagnosisResult(BaseModel):
     diagnosed_disease: str
     confidence_score: float
     confidence_note: str
-    management: list[str]
-    prevention: list[str]
-    precautions: list[str]
-    references: list[str]
+    recommendations: Recommendations | None
+    recommendation_note: str | None = None
     explanation: str
 
 
